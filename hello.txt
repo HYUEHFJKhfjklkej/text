@@ -1,39 +1,61 @@
 (async () => {
   const APPLY = false;
 
-  const names = ["core_sdk", "gui_sdk", "plugin_sdk",
-                 "sura_connector_client", "chart_data_manager", "charts_common"];
+  const names = [
+    "core_sdk",
+    "gui_sdk",
+    "plugin_sdk",
+    "sura_connector_client",
+    "chart_data_manager",
+    "charts_common"
+  ];
 
   const api = location.origin + "/app/rest";
-  const esc = s => encodeURIComponent(s);
-  const req = async (u, o = {}) => {
-    const r = await fetch(u, { credentials: "same-origin", ...o,
-      headers: { Accept: "application/json", ...(o.headers || {}) } });
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText} ${u}`);
+
+  async function req(url, opts) {
+    opts = opts || {};
+    const headers = Object.assign({ Accept: "application/json" }, opts.headers || {});
+    const r = await fetch(url, Object.assign({ credentials: "same-origin" }, opts, { headers: headers }));
+    if (!r.ok) throw new Error(r.status + " " + r.statusText + " " + url);
     return r;
-  };
+  }
 
-  const all = (await (await req(`${api}/projects`)).json()).project || [];
+  const data = await (await req(api + "/projects")).json();
+  const all = data.project || [];
 
-  const plan = names.map(n => {
+  const plan = [];
+  for (const n of names) {
     const hits = all.filter(p => p.name === n);
-    return { name: n, to: n.toUpperCase(), id: hits[0]?.id || "",
-             state: hits.length === 1 ? "READY" : : "MISSING" };
-  });
+    let state = "MISSING";
+    let id = "";
+    if (hits.length === 1) {
+      state = "READY";
+      id = hits[0].id;
+    } else if (hits.length > 1) {
+      state = "AMBIGUOUS";
+    }
+    plan.push({ name: n, to: n.toUpperCase(), id: id, state: state });
+  }
 
   console.table(plan);
-  if (plan.some(x => x.state !== "READY"))
-    throw new Error("Есть MISSING или AMBIGUOUS. Ничего не изменено.");
-  if (!APPLY)
-    return console.log("DRY RUN: TeamCity не изменён. Поставьте APPLY = true.");
 
   for (const x of plan) {
-    await req(`${api}/projects/id:${esc(x.id)}/nam
-      method: "PUT",
-      headers: { "Content-Type": "text/plain; char
-      body: x.to,
-    });
-    console.log(`RENAMED: ${x.name} -> ${x.to}`);
+    if (x.state !== "READY") throw new Error("Есть MISSING или AMBIGUOUS. Ничего не изменено.");
   }
+
+  if (!APPLY) {
+    console.log("DRY RUN: TeamCity не изменён. Поставьте APPLY = true.");
+    return;
+  }
+
+  for (const x of plan) {
+    await req(api + "/projects/id:" + encodeURIComponent(x.id) + "/name", {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: x.to
+    });
+    console.log("RENAMED: " + x.name + " -> " + x.to);
+  }
+
   console.log("ГОТОВО: TeamCity обработан.");
 })().catch(e => console.error("ОШИБКА:", e));
