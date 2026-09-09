@@ -1,3 +1,15 @@
+cfg=$(find / -name NuGet.Config -not -path '/proc/*' 2>/dev/null | head -1 || true)
+if [ -z "$cfg" ]; then
+    echo "conan-feed: NuGet.Config в контейнере не найден, пропускаю"
+elif grep -q 'key="Conan"' "$cfg"; then
+    echo "conan-feed: источник уже есть в $cfg"
+else
+    sed -i "s#</packageSources>#  <add key=\"Conan\" value=\"http://proget.inc.elara.local/nuget/Conan/\" />\n  </packageSources>#" "$cfg"
+    echo "conan-feed: источник добавлен в $cfg"
+    grep -n '<add key' "$cfg" || true
+fi
+
+
 curl -sI "http://proget.inc.elara.local/nuget/Default/package/rapidjson.lin.gcc84.shared.x86_64/1.1.20250205"
 curl -sI "http://proget.inc.elara.local/nuget/Conan/package/rapidjson.lin.gcc84.shared.x86_64/1.1.20250205"
 
