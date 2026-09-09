@@ -1,4 +1,5 @@
-curl -s "http://proget.inc.elara.local/nuget/Default/FindPackagesById()?id='rapidjson.lin.gcc84.shared.x86_64'" | grep -o "<d:Version>[^<]*"
+curl -sI "http://proget.inc.elara.local/nuget/Default/package/rapidjson.lin.gcc84.shared.x86_64/1.1.20250205"
+curl -sI "http://proget.inc.elara.local/nuget/Conan/package/rapidjson.lin.gcc84.shared.x86_64/1.1.20250205"
 
 docker run --rm proget.inc.elara.local/main/library/gcc84-build-x86_64:0.1.0 \
     sh -lc 'f=$(find / -name NuGet.Config 2>/dev/null | head -1); echo "$f"; cat "$f"'
