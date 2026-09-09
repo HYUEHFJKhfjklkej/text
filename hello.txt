@@ -1,3 +1,6 @@
+ <add key="Conan" value="http://proget.inc.elara.local/nuget/Conan/" allowInsecureConnections="true" />
+
+
 # ПО сервера ИИ
 
 Приложение к записке от 21.08.2026. Сервер ASUS ESC4000A-E12, 4× RTX PRO 5000 Blackwell (288 ГБ).
