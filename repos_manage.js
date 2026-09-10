@@ -39,12 +39,16 @@
     "file_factory"
   ];
 
-  // Bitbucket: ключ проекта, внутри которого лежат репозитории.
+  // Переименование ищет объект по имени во ВСЁМ дереве, эти настройки на него
+  // не влияют. Они нужны только для создания новых.
+
+  // Bitbucket: ключ проекта, куда создавать новые репозитории.
   // Виден в адресе страницы проекта: /projects/<КЛЮЧ>/
   var BITBUCKET_PROJECT = "SU2";
 
-  // TeamCity: путь до родительского проекта, по именам, сверху вниз.
-  var TC_PARENT_PATH = ["SURA2", "COMPONENTS", "CMAKE", "EL_CONF"];
+  // TeamCity: путь до родителя для новых проектов, по именам, сверху вниз.
+  // Хвост пути достаточно указать так, чтобы он совпал однозначно.
+  var TC_PARENT_PATH = ["SURA2", "COMPONENTS", "CMAKE"];
 
   // ------------------------------------------------------------------- ОБЩЕЕ
 
@@ -108,20 +112,25 @@
   // -------------------------------------------------------------- BITBUCKET
 
   async function runBitbucket() {
-    var api = location.origin + "/rest/api/1.0/projects/" + BITBUCKET_PROJECT;
+    var root = location.origin + "/rest/api/1.0";
+    var api = root + "/projects/" + BITBUCKET_PROJECT;
 
+    // Смотрим ВСЕ видимые репозитории, а не один проект: искомый может лежать
+    // не там, где предполагалось, и тогда план молча покажет MISSING.
     var repos = [];
     var start = 0;
     for (;;) {
-      var page = await (await req(api + "/repos?limit=1000&start=" + start)).json();
+      var page = await (await req(root + "/repos?limit=1000&start=" + start)).json();
       repos = repos.concat(page.values || []);
       if (page.isLastPage !== false) break;
       start = page.nextPageStart;
     }
-    console.log("Репозиториев в проекте " + BITBUCKET_PROJECT + ": " + repos.length);
+    console.log("Видно репозиториев: " + repos.length);
 
     var bySlug = {};
     for (var i = 0; i < repos.length; i++) {
+      var key = (repos[i].project && repos[i].project.key) || "?";
+      repos[i]._key = key;
       bySlug[(repos[i].slug || "").toLowerCase()] = repos[i];
       bySlug[(repos[i].name || "").toLowerCase()] = repos[i];
     }
@@ -135,7 +144,13 @@
       var state = "MISSING";
       if (src && dst) state = "CONFLICT";
       else if (src) state = "READY";
-      plan.push({ action: "RENAME", from: from, to: to, state: state });
+      plan.push({
+        action: "RENAME",
+        from: from,
+        to: to,
+        project: src ? src._key : "",
+        state: state
+      });
     }
     for (var c = 0; c < CREATES.length; c++) {
       var name = CREATES[c];
@@ -143,6 +158,7 @@
         action: "CREATE",
         from: "",
         to: name,
+        project: BITBUCKET_PROJECT,
         state: bySlug[name] ? "EXISTS" : "READY"
       });
     }
@@ -153,7 +169,8 @@
       var f = RENAMES[r2][0];
       var t = RENAMES[r2][1];
       var repo = bySlug[f];
-      await req(api + "/repos/" + encodeURIComponent(repo.slug), {
+      var rapi = root + "/projects/" + encodeURIComponent(repo._key);
+      await req(rapi + "/repos/" + encodeURIComponent(repo.slug), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: t })
@@ -206,57 +223,65 @@
       return parts;
     }
 
+    // Родитель нужен только для создания новых. Хвост пути должен совпасть.
     var wanted = TC_PARENT_PATH.join("/").toLowerCase();
     var parents = [];
     for (var j = 0; j < all.length; j++) {
       var full = pathOf(all[j]).join("/").toLowerCase();
-      var last = TC_PARENT_PATH[TC_PARENT_PATH.length - 1].toLowerCase();
-      if (full.indexOf(wanted) !== -1 && full.split("/").pop() === last) {
+      if (full === wanted || full.lastIndexOf("/" + wanted) === full.length - wanted.length - 1) {
         parents.push(all[j]);
       }
     }
-    if (parents.length !== 1) {
-      console.error("ОШИБКА: родительский путь " + TC_PARENT_PATH.join("/")
-                    + " найден " + parents.length + " раз. Поправьте TC_PARENT_PATH.");
-      return;
+    var parentId = "";
+    if (parents.length === 1) {
+      parentId = parents[0].id;
+      console.log("Родитель для новых: " + pathOf(parents[0]).join("/") + " (" + parentId + ")");
+    } else {
+      console.warn("Родитель " + TC_PARENT_PATH.join("/") + " найден "
+                   + parents.length + " раз. Создание будет недоступно.");
     }
-    var parentId = parents[0].id;
-    console.log("Родительский проект: " + parents[0].name + " (" + parentId + ")");
 
-    var children = [];
-    for (var k = 0; k < all.length; k++) {
-      if (all[k].parentProjectId === parentId) children.push(all[k]);
-    }
-    var byName = {};
-    for (var m = 0; m < children.length; m++) {
-      byName[(children[m].name || "").toLowerCase()] = children[m];
+    // Переименование ищет по ВСЕМУ дереву: объект может лежать не там, где
+    // ожидалось. Именно на этом прошлый прогон дал MISSING.
+    function findAll(name) {
+      var hits = [];
+      var low = (name || "").toLowerCase();
+      for (var i = 0; i < all.length; i++) {
+        if ((all[i].name || "").toLowerCase() === low) hits.push(all[i]);
+      }
+      return hits;
     }
 
     var plan = [];
     for (var r = 0; r < RENAMES.length; r++) {
       var from = RENAMES[r][0];
       var to = RENAMES[r][1];
-      var src = byName[from];
-      var dst = byName[to];
+      var srcs = findAll(from);
+      var dsts = findAll(to);
       var state = "MISSING";
-      if (src && dst && src.id !== dst.id) state = "CONFLICT";
-      else if (src) state = "READY";
+      if (srcs.length > 1) state = "AMBIGUOUS";
+      else if (srcs.length === 1 && dsts.length) state = "CONFLICT";
+      else if (srcs.length === 1) state = "READY";
       plan.push({
         action: "RENAME",
         from: from,
         to: to.toUpperCase(),
-        id: src ? src.id : "",
+        path: srcs.length === 1 ? pathOf(srcs[0]).join("/") : "",
+        id: srcs.length === 1 ? srcs[0].id : "",
         state: state
       });
     }
     for (var c = 0; c < CREATES.length; c++) {
       var name = CREATES[c];
+      var st = findAll(name).length ? "EXISTS" : "READY";
+      if (st === "READY" && !parentId) st = "NO_PARENT";
       plan.push({
         action: "CREATE",
         from: "",
         to: name.toUpperCase(),
+        path: parentId ? pathOf(parents[0]).join("/") : "",
         id: "",
-        state: byName[name] ? "EXISTS" : "READY"
+        state: st
       });
     }
 
@@ -265,7 +290,7 @@
     for (var r2 = 0; r2 < RENAMES.length; r2++) {
       var f = RENAMES[r2][0];
       var t = RENAMES[r2][1].toUpperCase();
-      var p = byName[f];
+      var p = findAll(f)[0];
       await req(api + "/projects/id:" + encodeURIComponent(p.id) + "/name", {
         method: "PUT",
         headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "text/plain" },
