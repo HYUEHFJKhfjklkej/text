@@ -46,8 +46,14 @@
   // Виден в адресе страницы проекта: /projects/<КЛЮЧ>/
   var BITBUCKET_PROJECT = "SU2";
 
-  // TeamCity: путь до родителя для новых проектов, по именам, сверху вниз.
-  // Хвост пути достаточно указать так, чтобы он совпал однозначно.
+  // TeamCity: куда создавать новые проекты.
+  // По умолчанию рядом с переименовываемым, то есть в его же родителе. Это
+  // надёжнее любого пути: объект уже найден, промахнуться негде.
+  // Если переименований нет или нужен другой родитель, задайте id явно.
+  // Id виден в адресе страницы проекта, ...&projectId=<ID>
+  var TC_PARENT_ID = "";
+
+  // Запасной вариант, если ни TC_PARENT_ID, ни переименований нет.
   var TC_PARENT_PATH = ["SURA2", "COMPONENTS", "CMAKE"];
 
   // ------------------------------------------------------------------- ОБЩЕЕ
@@ -223,26 +229,8 @@
       return parts;
     }
 
-    // Родитель нужен только для создания новых. Хвост пути должен совпасть.
-    var wanted = TC_PARENT_PATH.join("/").toLowerCase();
-    var parents = [];
-    for (var j = 0; j < all.length; j++) {
-      var full = pathOf(all[j]).join("/").toLowerCase();
-      if (full === wanted || full.lastIndexOf("/" + wanted) === full.length - wanted.length - 1) {
-        parents.push(all[j]);
-      }
-    }
-    var parentId = "";
-    if (parents.length === 1) {
-      parentId = parents[0].id;
-      console.log("Родитель для новых: " + pathOf(parents[0]).join("/") + " (" + parentId + ")");
-    } else {
-      console.warn("Родитель " + TC_PARENT_PATH.join("/") + " найден "
-                   + parents.length + " раз. Создание будет недоступно.");
-    }
-
     // Переименование ищет по ВСЕМУ дереву: объект может лежать не там, где
-    // ожидалось. Именно на этом прошлый прогон дал MISSING.
+    // ожидалось. Именно на этом первый прогон дал MISSING.
     function findAll(name) {
       var hits = [];
       var low = (name || "").toLowerCase();
@@ -250,6 +238,50 @@
         if ((all[i].name || "").toLowerCase() === low) hits.push(all[i]);
       }
       return hits;
+    }
+
+    // Родитель для новых проектов, три источника по убыванию надёжности.
+    var parentId = "";
+    var parentWhy = "";
+
+    if (TC_PARENT_ID) {
+      parentId = TC_PARENT_ID;
+      parentWhy = "задан в TC_PARENT_ID";
+    }
+
+    if (!parentId && RENAMES.length) {
+      var first = findAll(RENAMES[0][0]);
+      if (first.length === 1 && first[0].parentProjectId) {
+        parentId = first[0].parentProjectId;
+        parentWhy = "родитель переименовываемого " + RENAMES[0][0];
+      }
+    }
+
+    if (!parentId) {
+      var wanted = TC_PARENT_PATH.join("/").toLowerCase();
+      var cands = [];
+      for (var j = 0; j < all.length; j++) {
+        var full = pathOf(all[j]).join("/").toLowerCase();
+        var tail = full.lastIndexOf("/" + wanted) === full.length - wanted.length - 1;
+        if (full === wanted || tail) cands.push(all[j]);
+      }
+      if (cands.length === 1) {
+        parentId = cands[0].id;
+        parentWhy = "путь " + TC_PARENT_PATH.join("/");
+      } else {
+        console.warn("Путь " + TC_PARENT_PATH.join("/") + " совпал "
+                     + cands.length + " раз. Кандидаты ниже, выберите нужный"
+                     + " и пропишите его id в TC_PARENT_ID.");
+        for (var q = 0; q < cands.length; q++) {
+          console.warn("  " + cands[q].id + "   " + pathOf(cands[q]).join("/"));
+        }
+      }
+    }
+
+    if (parentId) {
+      var pobj = byId[parentId];
+      var ppath = pobj ? pathOf(pobj).join("/") : parentId;
+      console.log("Родитель для новых: " + ppath + " (" + parentId + "), " + parentWhy);
     }
 
     var plan = [];
@@ -279,7 +311,7 @@
         action: "CREATE",
         from: "",
         to: name.toUpperCase(),
-        path: parentId ? pathOf(parents[0]).join("/") : "",
+        path: parentId && byId[parentId] ? pathOf(byId[parentId]).join("/") : "",
         id: "",
         state: st
       });
