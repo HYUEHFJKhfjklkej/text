@@ -23,21 +23,13 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 
+# Заявка Неплюева от 10.09.2026. Старые имена el_conf_* из списка убраны:
+# репозитории переименованы, и повторный CREATE под старым именем завёл бы
+# в TeamCity проекты-призраки.
 REPOSITORIES = (
-    "as_system_data",
-    "el_conf_chart_data_manager",
-    "el_conf_config_builder",
-    "el_conf_device_config_manager",
-    "el_conf_core_sdk",
-    "el_conf_gui_sdk",
-    "el_conf_themes",
-    "el_conf_utils",
-    "qt_rest_api",
-    "el_conf_elecont_protocol_client",
-    "el_conf_plugin_sdk",
-    "el_conf_sura_connector_client",
-    "el_conf_chart_ui_plugin",
-    "as_app",
+    "device_config_manager",
+    "elecont_protocol_client",
+    "file_factory",
 )
 
 DEFAULT_TEAMCITY_URL = "http://teamcity.inc.elara.local"
@@ -135,6 +127,17 @@ class TeamCity:
         )
         payload = self.json("GET", "/projects?" + query)
         return payload.get("project", [])
+
+    def project_detail(self, project_id):
+        locator = urllib.parse.quote("id:" + project_id, safe=":_-")
+        query = urllib.parse.urlencode(
+            {"fields": "id,name,buildTypes(count),projects(count),vcsRoots(count)"}
+        )
+        return self.json("GET", "/projects/{}?{}".format(locator, query))
+
+    def delete_project(self, project_id):
+        locator = urllib.parse.quote("id:" + project_id, safe=":_-")
+        self.request("DELETE", "/projects/{}".format(locator), accept="text/plain")
 
     def copy_project(self, source_id, parent_id, project_id, name):
         root = ET.Element(
@@ -277,6 +280,20 @@ def classify(existing_by_name, existing_by_id, parent_id, repo_name):
     return "UNMANAGED", project_id, existing
 
 
+def is_empty_project(detail):
+    """Проект без конфигураций, подпроектов и своих VCS-корней.
+
+    Такой проект появляется, если его создали пустым (repos_manage.js) и ещё
+    ничего не настроили. Терять в нём нечего, поэтому его можно снести и
+    пересоздать полноценной копией донора.
+    """
+    for key in ("buildTypes", "projects", "vcsRoots"):
+        block = detail.get(key) or {}
+        if int(block.get("count") or 0):
+            return False
+    return True
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         description="Create TeamCity projects for split EL_CONF repositories"
@@ -294,6 +311,12 @@ def parse_args(argv):
         "--source-path",
         default=os.environ.get("TC_SOURCE_PATH", DEFAULT_SOURCE_PATH),
         help="full path of the TeamCity project to copy",
+    )
+    parser.add_argument(
+        "--adopt-empty",
+        action="store_true",
+        help="existing but empty projects (no build types, subprojects or VCS "
+             "roots) are deleted and re-created as a copy of the source",
     )
     parser.add_argument("--timeout", type=int, default=30)
     return parser.parse_args(argv)
@@ -325,6 +348,14 @@ def main(argv=None):
         state, project_id, existing = classify(
             by_name, by_id, parent_id, repo_name
         )
+
+        # Проект уже есть, но создан не нами. Если он пуст, его можно снести и
+        # пересоздать копией донора. Непустой трогать нельзя.
+        if state in ("CONFLICT", "UNMANAGED") and args.adopt_empty:
+            detail = tc.project_detail(existing["id"])
+            if is_empty_project(detail):
+                state = "ADOPT"
+
         plan.append((state, project_id, repo_name, existing))
         suffix = ""
         if existing:
@@ -334,17 +365,24 @@ def main(argv=None):
             conflicts += 1
 
     if conflicts:
+        if args.adopt_empty:
+            hint = "They are not empty, so --adopt-empty will not touch them."
+        else:
+            hint = "If they are empty shells, re-run with --adopt-empty."
         raise TeamCityError(
-            "Refusing to apply: {} existing project conflict(s) require manual review".format(
-                conflicts
-            )
+            "Refusing to apply: {} existing project conflict(s) require manual "
+            "review. {}".format(conflicts, hint)
         )
 
     if not args.apply:
         print("\nPlan only. Run again with --apply to create/reconcile these projects.")
         return 0
 
-    for state, project_id, repo_name, _existing in plan:
+    for state, project_id, repo_name, existing in plan:
+        if state == "ADOPT":
+            print("Deleting empty {} ({})...".format(repo_name, existing["id"]))
+            tc.delete_project(existing["id"])
+            state = "CREATE"
         if state == "CREATE":
             print("Copying EL_CONF -> {}...".format(repo_name))
             tc.copy_project(source["id"], parent_id, project_id, repo_name.upper())
