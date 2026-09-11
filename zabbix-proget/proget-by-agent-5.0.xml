@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Шаблон "ProGet by Zabbix agent" для Zabbix 5.0.
-  Пара к scripts/70-proget-zabbix-agent.sh: все ключи proget.* это
-  UserParameter'ы из /etc/zabbix/zabbix_agentd.d/proget.conf на хосте.
+  Пара к 70-proget-zabbix-agent.sh: все ключи proget.* это UserParameter'ы
+  из /etc/zabbix/zabbix_agentd.d/proget.conf на хосте.
+
+  Все проверки АКТИВНЫЕ: агент сам ходит на сервер (10051), входящий 10050
+  на хосте ProGet открывать не нужно. Поэтому Hostname в конфиге агента
+  обязан совпадать с именем хоста в Zabbix буква в букву.
 
   Импорт: Configuration > Templates > Import.
   Макросы хоста:
@@ -39,6 +43,7 @@
             <items>
                 <item>
                     <name>ProGet: health raw</name>
+                    <type>ZABBIX_ACTIVE</type>
                     <key>proget.health.raw</key>
                     <delay>2m</delay>
                     <history>1d</history>
@@ -52,6 +57,7 @@
                 </item>
                 <item>
                     <name>ProGet: health response time</name>
+                    <type>ZABBIX_ACTIVE</type>
                     <key>proget.health.rtt</key>
                     <delay>2m</delay>
                     <history>7d</history>
@@ -73,6 +79,7 @@
                 </item>
                 <item>
                     <name>ProGet: service status</name>
+                    <type>ZABBIX_ACTIVE</type>
                     <key>proget.health[serviceStatus]</key>
                     <delay>2m</delay>
                     <history>7d</history>
@@ -98,6 +105,7 @@
                 </item>
                 <item>
                     <name>ProGet: database status</name>
+                    <type>ZABBIX_ACTIVE</type>
                     <key>proget.health[databaseStatus]</key>
                     <delay>2m</delay>
                     <history>7d</history>
@@ -118,6 +126,7 @@
                 </item>
                 <item>
                     <name>ProGet: license status</name>
+                    <type>ZABBIX_ACTIVE</type>
                     <key>proget.health[licenseStatus]</key>
                     <delay>10m</delay>
                     <history>7d</history>
@@ -139,6 +148,7 @@
                 </item>
                 <item>
                     <name>ProGet: version</name>
+                    <type>ZABBIX_ACTIVE</type>
                     <key>proget.health[versionNumber]</key>
                     <delay>1h</delay>
                     <history>30d</history>
@@ -161,6 +171,7 @@
                 </item>
                 <item>
                     <name>ProGet: TLS certificate days left</name>
+                    <type>ZABBIX_ACTIVE</type>
                     <key>proget.cert.days</key>
                     <delay>6h</delay>
                     <history>30d</history>
@@ -183,29 +194,18 @@
                         </trigger>
                     </triggers>
                 </item>
-                <item>
-                    <name>ProGet: data directory size</name>
-                    <key>proget.data.bytes</key>
-                    <delay>1h</delay>
-                    <history>30d</history>
-                    <trends>365d</trends>
-                    <units>B</units>
-                    <applications>
-                        <application>
-                            <name>ProGet</name>
-                        </application>
-                    </applications>
-                </item>
             </items>
             <discovery_rules>
                 <discovery_rule>
                     <name>ProGet containers</name>
+                    <type>ZABBIX_ACTIVE</type>
                     <key>proget.containers.discovery</key>
                     <delay>1h</delay>
                     <description>Ключ proget.containers.discovery на агенте возвращает LLD-JSON со списком контейнеров, зашитым при установке (CONTAINERS в 70-proget-zabbix-agent.sh).</description>
                     <item_prototypes>
                         <item_prototype>
                             <name>Container {#NAME}: state</name>
+                            <type>ZABBIX_ACTIVE</type>
                             <key>proget.container.state[{#NAME}]</key>
                             <delay>1m</delay>
                             <history>7d</history>
@@ -226,6 +226,7 @@
                         </item_prototype>
                         <item_prototype>
                             <name>Container {#NAME}: health</name>
+                            <type>ZABBIX_ACTIVE</type>
                             <key>proget.container.health[{#NAME}]</key>
                             <delay>1m</delay>
                             <history>7d</history>
@@ -246,6 +247,7 @@
                         </item_prototype>
                         <item_prototype>
                             <name>Container {#NAME}: restart count</name>
+                            <type>ZABBIX_ACTIVE</type>
                             <key>proget.container.restarts[{#NAME}]</key>
                             <delay>1m</delay>
                             <history>7d</history>

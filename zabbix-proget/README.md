@@ -42,8 +42,9 @@ proget.cert.days                         <число дней>
 ## На сервере Zabbix
 
 1. `Configuration > Templates > Import`, файл `proget-by-agent-5.0.xml`.
-2. `Configuration > Hosts > Create host`. Имя как `hostname -f` на ProGet,
-   интерфейс Agent на IP хоста, порт 10050.
+2. `Configuration > Hosts > Create host`. Имя РОВНО как `hostname -f` на
+   ProGet, буква в букву: проверки активные, сервер узнаёт хост по имени.
+   Интерфейс Agent нужен формально, IP хоста, порт 10050.
 3. Привязать шаблоны `ProGet by Zabbix agent` и `Template OS Linux by Zabbix agent`.
 4. Через пару минут в `Latest data` по хосту появятся `ProGet: *` и
    `Container proget-server: *`.
@@ -61,3 +62,16 @@ proget.cert.days                         <число дней>
 | `proget.cert.days` | меньше 14 дней, либо сертификат не читается |
 
 Пороги в макросах шаблона: `{$PROGET.RTT.MAX}`, `{$PROGET.CERT.MIN}`.
+
+## Что учтено
+
+- Все проверки активные. Файрвол на хосте ProGet открывает только 22, 80,
+  443, и 10050 туда добавлять не надо. Агент сам ходит на сервер, порт 10051
+  исходящий.
+- `curl --noproxy '*'`: корпоративный прокси перехватывает запросы на
+  127.0.0.1 и отдаёт свой 302 вместо ProGet.
+- Пользователь `zabbix` добавляется в группу `docker` ради `docker inspect`.
+  Это равно root на хосте. Если политика не позволяет, уберите `usermod` в
+  скрипте, контейнерные ключи будут отдавать `missing`.
+- Размер `/var/proget` не считается через `du`: на больших данных он не
+  укладывается в таймаут. Диск покрывает `Template OS Linux by Zabbix agent`.

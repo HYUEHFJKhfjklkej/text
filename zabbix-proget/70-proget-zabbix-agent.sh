@@ -29,7 +29,6 @@
 #   AGENT_TGZ     тарбол статического агента; нужен только если агента нет
 #   PROGET_URL    адрес ProGet на loopback (по умолч. http://127.0.0.1:8624)
 #   PROGET_FQDN   внешнее имя для проверки сертификата (по умолч. hostname -f)
-#   PROGET_DATA   каталог данных (по умолч. /var/proget)
 #   CONTAINERS    контейнеры для проверки (по умолч. proget-server proget-database)
 #   DRY_RUN=1     показать, что будет сделано
 set -euo pipefail
@@ -39,7 +38,6 @@ ZBX_HOSTNAME="${ZBX_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}"
 AGENT_TGZ="${AGENT_TGZ:-}"
 PROGET_URL="${PROGET_URL:-http://127.0.0.1:8624}"
 PROGET_FQDN="${PROGET_FQDN:-$(hostname -f 2>/dev/null || hostname)}"
-PROGET_DATA="${PROGET_DATA:-/var/proget}"
 CONTAINERS="${CONTAINERS:-proget-server proget-database}"
 
 CONF_DIR=/etc/zabbix
@@ -239,12 +237,13 @@ UserParameter=proget.container.health[*],docker inspect -f '{{if .State.Health}}
 # Сертификат внешнего имени, дней до конца.
 UserParameter=proget.cert.days,$SCRIPTS_DIR/cert_days.sh $PROGET_FQDN 443
 
-# Данные ProGet: занято байт (для тренда), помимо штатного vfs.fs.size.
-UserParameter=proget.data.bytes,du -sb $PROGET_DATA 2>/dev/null | cut -f1
 EOF
 fi
 
-# docker inspect нужен доступ к сокету: группа docker.
+# docker inspect нужен доступ к сокету: группа docker. Это осознанно: членство в
+# docker равно root на хосте, но альтернатива (socket-proxy) для двух
+# inspect-ов избыточна. Если политика не позволяет, уберите строку и
+# контейнерные ключи будут отдавать missing.
 if getent group docker >/dev/null 2>&1; then
     run usermod -aG docker zabbix
 else
@@ -263,7 +262,7 @@ if [ -z "${DRY_RUN:-}" ]; then
     for key in agent.ping "proget.health[serviceStatus]" "proget.health[databaseStatus]" \
                "proget.health[licenseStatus]" "proget.health[versionNumber]" proget.health.rtt \
                $(for c in $CONTAINERS; do echo "proget.container.state[$c]"; done) \
-               proget.containers.discovery proget.cert.days proget.data.bytes; do
+               proget.containers.discovery proget.cert.days; do
         printf '  %-40s ' "$key"
         zabbix_get -s 127.0.0.1 -k "$key" 2>&1 | head -1 || true
     done
@@ -272,6 +271,6 @@ fi
 echo
 say "готово. Дальше на сервере Zabbix:"
 echo "  1. Импортировать шаблон zabbix/proget-by-agent-5.0.xml (Configuration > Templates > Import)."
-echo "  2. Создать хост '$ZBX_HOSTNAME', интерфейс agent на IP этого хоста, порт 10050."
+echo "  2. Создать хост с именем РОВНО '$ZBX_HOSTNAME': проверки активные, имя должно совпасть."
 echo "  3. Привязать шаблоны: 'ProGet by Zabbix agent', 'Template OS Linux by Zabbix agent'."
 echo "  4. В макросах хоста при необходимости: {\$PROGET.CONTAINERS} = $CONTAINERS"
