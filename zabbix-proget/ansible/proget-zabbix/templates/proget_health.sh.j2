@@ -1,0 +1,20 @@
+#!/bin/sh
+# proget_health.sh <поле|raw|rtt>. {{ ansible_managed }}
+# Поля /health у ProGet 2026: applicationName, databaseStatus, extensionsInstalled,
+# licenseStatus, serviceStatus, versionNumber, releaseNumber.
+# --noproxy: корпоративный прокси перехватывает 127.0.0.1 и отдаёт свой 302.
+url="{{ proget_zabbix_url }}/health"
+case "${1:-raw}" in
+    rtt)
+        curl -s -o /dev/null --noproxy '*' -m 8 -w '%{time_total}' "$url" 2>/dev/null || echo 0
+        ;;
+    raw)
+        curl -s --noproxy '*' -m 8 "$url" 2>/dev/null || echo '{}'
+        ;;
+    *)
+        body=$(curl -s --noproxy '*' -m 8 "$url" 2>/dev/null) || body='{}'
+        val=$(printf '%s' "$body" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
+        [ -n "$val" ] || val=$(printf '%s' "$body" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([^,}]*\).*/\1/p")
+        printf '%s\n' "${val:-UNKNOWN}"
+        ;;
+esac

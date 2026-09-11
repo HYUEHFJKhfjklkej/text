@@ -29,6 +29,7 @@
 #   AGENT_TGZ     тарбол статического агента; нужен только если агента нет
 #   PROGET_URL    адрес ProGet на loopback (по умолч. http://127.0.0.1:8624)
 #   PROGET_FQDN   внешнее имя для проверки сертификата (по умолч. hostname -f)
+#   PROGET_DATA   каталог данных (по умолч. /var/proget)
 #   CONTAINERS    контейнеры для проверки (по умолч. proget-server proget-database)
 #   DRY_RUN=1     показать, что будет сделано
 set -euo pipefail
@@ -38,6 +39,7 @@ ZBX_HOSTNAME="${ZBX_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}"
 AGENT_TGZ="${AGENT_TGZ:-}"
 PROGET_URL="${PROGET_URL:-http://127.0.0.1:8624}"
 PROGET_FQDN="${PROGET_FQDN:-$(hostname -f 2>/dev/null || hostname)}"
+PROGET_DATA="${PROGET_DATA:-/var/proget}"
 CONTAINERS="${CONTAINERS:-proget-server proget-database}"
 
 CONF_DIR=/etc/zabbix
@@ -143,6 +145,29 @@ EOF
     run systemctl daemon-reload
 fi
 
+# --- 2b. Агент уже стоял: чиним Hostname/Server в его основном конфиге -------
+# Типовая причина "агент не работает": после cutover Hostname остался
+# staging-значением (proget-new), а сервер узнаёт хост по имени.
+
+if [ -n "$existing" ]; then
+    main_conf=$CONF_DIR/zabbix_${existing}.conf
+    [ -f "$main_conf" ] || fail "нет $main_conf"
+    say "было в $main_conf:"
+    grep -E '^(Server|ServerActive|Hostname|HostnameItem)=' "$main_conf" || true
+    if [ -n "${DRY_RUN:-}" ]; then
+        echo "[DRY] выставить Hostname/Server/ServerActive в $main_conf"
+    else
+        cp -a "$main_conf" "$main_conf.bak-$(date +%Y%m%d%H%M%S)"
+        sed -i -E '/^[[:space:]]*#?[[:space:]]*(Server|ServerActive|Hostname|HostnameItem)=/d' \
+            "$main_conf"
+        {
+            echo "Server=127.0.0.1,$ZBX_SERVER"
+            echo "ServerActive=$ZBX_SERVER"
+            echo "Hostname=$ZBX_HOSTNAME"
+        } >> "$main_conf"
+    fi
+fi
+
 # --- 3. Конфиг под ProGet -----------------------------------------------------
 
 run install -d -m 0755 "$DROPIN_DIR" "$SCRIPTS_DIR"
@@ -237,13 +262,12 @@ UserParameter=proget.container.health[*],docker inspect -f '{{if .State.Health}}
 # Сертификат внешнего имени, дней до конца.
 UserParameter=proget.cert.days,$SCRIPTS_DIR/cert_days.sh $PROGET_FQDN 443
 
+# Данные ProGet: занято байт (для тренда), помимо штатного vfs.fs.size.
+UserParameter=proget.data.bytes,du -sb $PROGET_DATA 2>/dev/null | cut -f1
 EOF
 fi
 
-# docker inspect нужен доступ к сокету: группа docker. Это осознанно: членство в
-# docker равно root на хосте, но альтернатива (socket-proxy) для двух
-# inspect-ов избыточна. Если политика не позволяет, уберите строку и
-# контейнерные ключи будут отдавать missing.
+# docker inspect нужен доступ к сокету: группа docker.
 if getent group docker >/dev/null 2>&1; then
     run usermod -aG docker zabbix
 else
@@ -262,7 +286,7 @@ if [ -z "${DRY_RUN:-}" ]; then
     for key in agent.ping "proget.health[serviceStatus]" "proget.health[databaseStatus]" \
                "proget.health[licenseStatus]" "proget.health[versionNumber]" proget.health.rtt \
                $(for c in $CONTAINERS; do echo "proget.container.state[$c]"; done) \
-               proget.containers.discovery proget.cert.days; do
+               proget.containers.discovery proget.cert.days proget.data.bytes; do
         printf '  %-40s ' "$key"
         zabbix_get -s 127.0.0.1 -k "$key" 2>&1 | head -1 || true
     done
@@ -271,6 +295,6 @@ fi
 echo
 say "готово. Дальше на сервере Zabbix:"
 echo "  1. Импортировать шаблон zabbix/proget-by-agent-5.0.xml (Configuration > Templates > Import)."
-echo "  2. Создать хост с именем РОВНО '$ZBX_HOSTNAME': проверки активные, имя должно совпасть."
+echo "  2. Создать хост '$ZBX_HOSTNAME', интерфейс agent на IP этого хоста, порт 10050."
 echo "  3. Привязать шаблоны: 'ProGet by Zabbix agent', 'Template OS Linux by Zabbix agent'."
 echo "  4. В макросах хоста при необходимости: {\$PROGET.CONTAINERS} = $CONTAINERS"

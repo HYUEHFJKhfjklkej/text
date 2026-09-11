@@ -75,3 +75,45 @@ proget.cert.days                         <число дней>
   скрипте, контейнерные ключи будут отдавать `missing`.
 - Размер `/var/proget` не считается через `du`: на больших данных он не
   укладывается в таймаут. Диск покрывает `Template OS Linux by Zabbix agent`.
+
+## Если агент уже стоит, но хост в Zabbix "красный"
+
+Типовая причина после переезда: в `/etc/zabbix/zabbix_agent2.conf` остался
+`Hostname=proget-new.inc.elara.local`, а хост на сервере заведён как
+`proget.inc.elara.local`. Сервер такого хоста не знает и данные выкидывает.
+
+Проверить на хосте ProGet:
+
+```bash
+grep -E '^(Server|ServerActive|Hostname)=' /etc/zabbix/zabbix_agent2.conf
+grep -iE 'cannot|refused|not found|failed' /var/log/zabbix/zabbix_agent2.log | tail
+```
+
+Починить руками, без переустановки:
+
+```bash
+sudo ZBX_SERVER=<IP zabbix-сервера> ZBX_HOSTNAME=proget.inc.elara.local \
+     bash 70-proget-zabbix-agent.sh
+```
+
+Скрипт видит стоящий agent2, делает бэкап конфига, выставляет
+`Hostname`, `Server`, `ServerActive`, кладёт drop-in с ProGet-ключами и
+перезапускает службу. `ZBX_HOSTNAME` должен буква в букву совпадать с именем
+хоста в `Configuration > Hosts` на сервере.
+
+## Через Ansible (репа ansible_for_migration_services)
+
+Папка `ansible/`: роль `proget-zabbix` и плейбук `70-proget-zabbix.yml`.
+Положить в репу как `roles/proget-zabbix` и `playbooks/70-proget-zabbix.yml`,
+затем:
+
+```bash
+ansible-playbook -i inventory playbooks/70-proget-zabbix.yml \
+    -e zabbix_agent_server=<IP zabbix-сервера>
+```
+
+Роль печатает текущие `Server/Hostname` и последние ошибки из лога агента,
+правит их, ставит drop-in, перезапускает агент и проверяет `/health`.
+`Hostname` берётся из `zabbix_agent_hostname` (в group_vars это
+`proget_fqdn`). После cutover в `hosts.yml` должно стоять
+`proget_fqdn: proget.inc.elara.local`, иначе роль снова запишет `proget-new`.

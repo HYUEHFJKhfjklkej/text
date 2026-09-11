@@ -1,0 +1,34 @@
+---
+# Мониторинг ProGet поверх уже установленного Zabbix-агента. Сам агент ставит
+# inc_elara.platform.zabbix_agent из baseline.yml, эта роль только добавляет
+# ключи под ProGet и ничего в самом агенте не меняет.
+
+# Какой агент стоит на хосте: agent2 (пакет Debian 13) либо agentd.
+# Определяется автоматически по наличию бинарника, это лишь умолчание.
+proget_zabbix_flavor: "agent2"
+
+# ProGet на loopback, как в proget-target.
+proget_zabbix_url: "http://{{ proget_listen_host | default('127.0.0.1') }}:{{ proget_listen_port | default(8624) }}"
+
+# Внешнее имя для проверки сертификата.
+proget_zabbix_cert_host: "{{ proget_fqdn }}"
+proget_zabbix_cert_port: 443
+
+# Контейнеры, за которыми следим. Имена из proget-target.
+proget_zabbix_containers:
+  - "{{ proget_container_name | default('proget-server') }}"
+  - "{{ proget_db_container_name | default('proget-database') }}"
+
+# docker inspect от имени zabbix требует группу docker. Это равно root на
+# хосте. Осознанный компромисс; выключается здесь, тогда контейнерные ключи
+# отдают "missing".
+proget_zabbix_docker_group: true
+
+proget_zabbix_scripts_dir: /etc/zabbix/scripts
+
+# --- Починка самого агента. Роль коллекции его поставила, но после cutover
+# Hostname остался staging-значением (proget-new), а сервер узнаёт хост по
+# имени. Эти три строки роль правит в основном конфиге агента.
+proget_zabbix_manage_core: true
+proget_zabbix_server: "{{ zabbix_agent_server | default('zabbix.inc.elara.local') }}"
+proget_zabbix_hostname: "{{ zabbix_agent_hostname | default(proget_fqdn) }}"

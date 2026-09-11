@@ -1,0 +1,115 @@
+---
+# Определить, какой агент стоит. Роль из коллекции может ставить любой из двух.
+- name: Detect installed Zabbix agent
+  ansible.builtin.stat:
+    path: "/usr/sbin/{{ item }}"
+  loop: [zabbix_agent2, zabbix_agentd]
+  register: proget_zabbix_bins
+
+- name: Resolve agent flavor, config dir and service
+  ansible.builtin.set_fact:
+    proget_zabbix_flavor: >-
+      {{ 'agent2' if proget_zabbix_bins.results[0].stat.exists
+         else ('agentd' if proget_zabbix_bins.results[1].stat.exists
+         else proget_zabbix_flavor) }}
+
+- name: Fail if no Zabbix agent is installed
+  ansible.builtin.fail:
+    msg: >-
+      На хосте нет ни zabbix_agent2, ни zabbix_agentd. Сначала baseline.yml
+      (роль inc_elara.platform.zabbix_agent).
+  when: not (proget_zabbix_bins.results | map(attribute='stat.exists') | select | list)
+
+- name: Set paths for {{ proget_zabbix_flavor }}
+  ansible.builtin.set_fact:
+    proget_zabbix_conf: "/etc/zabbix/zabbix_{{ proget_zabbix_flavor }}.conf"
+    proget_zabbix_dropin_dir: "/etc/zabbix/zabbix_{{ proget_zabbix_flavor }}.d"
+    proget_zabbix_service: "zabbix-{{ 'agent2' if proget_zabbix_flavor == 'agent2' else 'agent' }}"
+    proget_zabbix_log: "/var/log/zabbix/zabbix_{{ proget_zabbix_flavor }}.log"
+
+# Что было до нас: адреса, имя и последние ошибки агента. Печатается всегда,
+# чтобы по одному прогону было видно, почему хост не отчитывается.
+- name: Read current core settings
+  ansible.builtin.shell:
+    cmd: grep -E '^(Server|ServerActive|Hostname|HostnameItem)=' {{ proget_zabbix_conf }} || true
+  register: proget_zabbix_before
+  changed_when: false
+
+- name: Read recent agent errors
+  ansible.builtin.shell:
+    cmd: grep -iE 'cannot|refused|not found|failed|error' {{ proget_zabbix_log }} 2>/dev/null | tail -8 || true
+  register: proget_zabbix_errors
+  changed_when: false
+
+- name: Show agent state before changes
+  ansible.builtin.debug:
+    msg:
+      - "конфиг: {{ proget_zabbix_conf }}"
+      - "{{ proget_zabbix_before.stdout_lines }}"
+      - "последние ошибки: {{ proget_zabbix_errors.stdout_lines }}"
+
+- name: Set Hostname, Server, ServerActive in agent config
+  ansible.builtin.lineinfile:
+    path: "{{ proget_zabbix_conf }}"
+    regexp: "^\\s*#?\\s*{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    insertafter: EOF
+  loop:
+    - { key: Hostname, value: "{{ proget_zabbix_hostname }}" }
+    - { key: Server, value: "127.0.0.1,{{ proget_zabbix_server }}" }
+    - { key: ServerActive, value: "{{ proget_zabbix_server }}" }
+  when: proget_zabbix_manage_core
+  notify: Restart zabbix agent
+
+- name: Ensure script and drop-in directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ proget_zabbix_scripts_dir }}"
+    - "{{ proget_zabbix_dropin_dir }}"
+
+- name: Install helper scripts
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ proget_zabbix_scripts_dir }}/{{ item }}"
+    mode: "0755"
+  loop:
+    - proget_health.sh
+    - proget_containers_lld.sh
+    - cert_days.sh
+  notify: Restart zabbix agent
+
+- name: Install ProGet user parameters
+  ansible.builtin.template:
+    src: proget.conf.j2
+    dest: "{{ proget_zabbix_dropin_dir }}/proget.conf"
+    mode: "0644"
+  notify: Restart zabbix agent
+
+- name: Allow zabbix user to inspect containers
+  ansible.builtin.user:
+    name: zabbix
+    groups: docker
+    append: true
+  when: proget_zabbix_docker_group
+  notify: Restart zabbix agent
+
+- name: Flush handlers before self-check
+  ansible.builtin.meta: flush_handlers
+
+# zabbix_get в пакете zabbix-get, его может не быть. Тогда проверяем скриптом.
+- name: Self-check via helper script
+  ansible.builtin.command:
+    argv: ["{{ proget_zabbix_scripts_dir }}/proget_health.sh", "serviceStatus"]
+  register: proget_zabbix_selfcheck
+  changed_when: false
+
+- name: Report
+  ansible.builtin.debug:
+    msg: >-
+      Zabbix {{ proget_zabbix_flavor }}: drop-in {{ proget_zabbix_dropin_dir }}/proget.conf,
+      serviceStatus={{ proget_zabbix_selfcheck.stdout }}.
+      Дальше на сервере: импорт zabbix/proget-by-agent-5.0.xml, хост с именем
+      как Hostname агента, шаблон 'ProGet by Zabbix agent'.

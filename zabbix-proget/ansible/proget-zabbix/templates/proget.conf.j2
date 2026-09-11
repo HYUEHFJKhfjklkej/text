@@ -1,0 +1,18 @@
+# ProGet: ключи для шаблона "ProGet by Zabbix agent".
+# {{ ansible_managed }}
+
+# /health целиком и по полям: proget.health[databaseStatus] и т.д.
+UserParameter=proget.health.raw,{{ proget_zabbix_scripts_dir }}/proget_health.sh raw
+UserParameter=proget.health.rtt,{{ proget_zabbix_scripts_dir }}/proget_health.sh rtt
+UserParameter=proget.health[*],{{ proget_zabbix_scripts_dir }}/proget_health.sh $1
+
+# LLD: список контейнеров для правила обнаружения в шаблоне.
+UserParameter=proget.containers.discovery,{{ proget_zabbix_scripts_dir }}/proget_containers_lld.sh
+
+# Контейнеры: running/exited/missing, health, число рестартов.
+UserParameter=proget.container.state[*],docker inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' $1 2>/dev/null || echo missing
+UserParameter=proget.container.restarts[*],docker inspect -f '{{ '{{' }}.RestartCount{{ '}}' }}' $1 2>/dev/null || echo -1
+UserParameter=proget.container.health[*],docker inspect -f '{{ '{{' }}if .State.Health{{ '}}' }}{{ '{{' }}.State.Health.Status{{ '}}' }}{{ '{{' }}else{{ '}}' }}none{{ '{{' }}end{{ '}}' }}' $1 2>/dev/null || echo missing
+
+# Сертификат внешнего имени, дней до конца.
+UserParameter=proget.cert.days,{{ proget_zabbix_scripts_dir }}/cert_days.sh {{ proget_zabbix_cert_host }} {{ proget_zabbix_cert_port }}

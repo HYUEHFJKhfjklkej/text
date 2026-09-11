@@ -1,0 +1,9 @@
+#!/bin/sh
+# cert_days.sh <host> [port]: дней до конца сертификата, -1 если не прочитался.
+# {{ ansible_managed }}
+host="$1"; port="${2:-443}"
+end=$(echo | timeout 5 openssl s_client -servername "$host" -connect "$host:$port" 2>/dev/null \
+      | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+[ -n "$end" ] || { echo -1; exit 0; }
+end_s=$(date -d "$end" +%s 2>/dev/null) || { echo -1; exit 0; }
+echo $(( (end_s - $(date +%s)) / 86400 ))

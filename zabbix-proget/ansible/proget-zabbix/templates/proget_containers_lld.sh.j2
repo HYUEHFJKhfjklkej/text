@@ -1,0 +1,5 @@
+#!/bin/sh
+# LLD-JSON для правила "ProGet containers". {{ ansible_managed }}
+# Имя макроса LLD экранировано через строковый литерал Jinja: открывающая
+# фигурная скобка с решёткой для Jinja означает начало комментария.
+printf '{"data":[{% for c in proget_zabbix_containers %}{"{{ '{#NAME}' }}":"{{ c }}"}{% if not loop.last %},{% endif %}{% endfor %}]}\n'

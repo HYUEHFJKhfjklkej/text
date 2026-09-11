@@ -1,0 +1,5 @@
+---
+- name: Restart zabbix agent
+  ansible.builtin.command:
+    argv: [systemctl, restart, "{{ proget_zabbix_service }}"]
+  changed_when: true

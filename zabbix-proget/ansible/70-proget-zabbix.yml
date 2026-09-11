@@ -1,0 +1,13 @@
+---
+# Ключи мониторинга ProGet поверх уже установленного Zabbix-агента.
+# Агент ставит baseline.yml (inc_elara.platform.zabbix_agent), эта роль его
+# не трогает: только drop-in с UserParameter'ами и скрипты.
+#
+# Шаблон для сервера Zabbix 5.0: zabbix/proget-by-agent-5.0.xml.
+# Имя хоста в Zabbix должно совпадать с Hostname агента, то есть с proget_fqdn.
+- name: ProGet monitoring keys for Zabbix agent
+  hosts: proget_target
+  become: true
+  gather_facts: true
+  roles:
+    - proget-zabbix
