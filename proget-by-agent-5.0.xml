@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Шаблон "ProGet by Zabbix agent" для Zabbix 5.0.
+  Пара к scripts/70-proget-zabbix-agent.sh: все ключи proget.* это
+  UserParameter'ы из /etc/zabbix/zabbix_agentd.d/proget.conf на хосте.
+
+  Импорт: Configuration > Templates > Import.
+  Макросы хоста:
+    {$PROGET.CONTAINERS}   список контейнеров через пробел (default: proget-server proget-database)
+    {$PROGET.RTT.MAX}      порог времени ответа /health, сек (default 3)
+    {$PROGET.CERT.MIN}     порог по сертификату, дней (default 14)
+-->
+<zabbix_export>
+    <version>5.0</version>
+    <date>2026-09-11T00:00:00Z</date>
+    <groups>
+        <group>
+            <name>Templates/Applications</name>
+        </group>
+    </groups>
+    <templates>
+        <template>
+            <template>ProGet by Zabbix agent</template>
+            <name>ProGet by Zabbix agent</name>
+            <description>Мониторинг ProGet 2026 через /health и docker inspect. Требует UserParameter'ы из 70-proget-zabbix-agent.sh.</description>
+            <groups>
+                <group>
+                    <name>Templates/Applications</name>
+                </group>
+            </groups>
+            <applications>
+                <application>
+                    <name>ProGet</name>
+                </application>
+                <application>
+                    <name>ProGet containers</name>
+                </application>
+            </applications>
+            <items>
+                <item>
+                    <name>ProGet: health raw</name>
+                    <key>proget.health.raw</key>
+                    <delay>2m</delay>
+                    <history>1d</history>
+                    <trends>0</trends>
+                    <value_type>TEXT</value_type>
+                    <applications>
+                        <application>
+                            <name>ProGet</name>
+                        </application>
+                    </applications>
+                </item>
+                <item>
+                    <name>ProGet: health response time</name>
+                    <key>proget.health.rtt</key>
+                    <delay>2m</delay>
+                    <history>7d</history>
+                    <trends>90d</trends>
+                    <value_type>FLOAT</value_type>
+                    <units>s</units>
+                    <applications>
+                        <application>
+                            <name>ProGet</name>
+                        </application>
+                    </applications>
+                    <triggers>
+                        <trigger>
+                            <expression>{min(5m)}&gt;{$PROGET.RTT.MAX}</expression>
+                            <name>ProGet: /health отвечает дольше {$PROGET.RTT.MAX} c уже 5 минут</name>
+                            <priority>WARNING</priority>
+                        </trigger>
+                    </triggers>
+                </item>
+                <item>
+                    <name>ProGet: service status</name>
+                    <key>proget.health[serviceStatus]</key>
+                    <delay>2m</delay>
+                    <history>7d</history>
+                    <trends>0</trends>
+                    <value_type>CHAR</value_type>
+                    <applications>
+                        <application>
+                            <name>ProGet</name>
+                        </application>
+                    </applications>
+                    <triggers>
+                        <trigger>
+                            <expression>{str(OK)}=0</expression>
+                            <name>ProGet: serviceStatus = {ITEM.LASTVALUE}</name>
+                            <priority>HIGH</priority>
+                        </trigger>
+                        <trigger>
+                            <expression>{nodata(10m)}=1</expression>
+                            <name>ProGet: нет данных от /health 10 минут</name>
+                            <priority>HIGH</priority>
+                        </trigger>
+                    </triggers>
+                </item>
+                <item>
+                    <name>ProGet: database status</name>
+                    <key>proget.health[databaseStatus]</key>
+                    <delay>2m</delay>
+                    <history>7d</history>
+                    <trends>0</trends>
+                    <value_type>CHAR</value_type>
+                    <applications>
+                        <application>
+                            <name>ProGet</name>
+                        </application>
+                    </applications>
+                    <triggers>
+                        <trigger>
+                            <expression>{str(OK)}=0</expression>
+                            <name>ProGet: databaseStatus = {ITEM.LASTVALUE}</name>
+                            <priority>HIGH</priority>
+                        </trigger>
+                    </triggers>
+                </item>
+                <item>
+                    <name>ProGet: license status</name>
+                    <key>proget.health[licenseStatus]</key>
+                    <delay>10m</delay>
+                    <history>7d</history>
+                    <trends>0</trends>
+                    <value_type>CHAR</value_type>
+                    <applications>
+                        <application>
+                            <name>ProGet</name>
+                        </application>
+                    </applications>
+                    <triggers>
+                        <trigger>
+                            <expression>{str(OK)}=0</expression>
+                            <name>ProGet: licenseStatus = {ITEM.LASTVALUE}</name>
+                            <priority>AVERAGE</priority>
+                            <description>Free Edition пишет сюда нарушения лицензии, например коннектор на собственный фид с нелокального адреса. Administration &gt; Licensing Violations.</description>
+                        </trigger>
+                    </triggers>
+                </item>
+                <item>
+                    <name>ProGet: version</name>
+                    <key>proget.health[versionNumber]</key>
+                    <delay>1h</delay>
+                    <history>30d</history>
+                    <trends>0</trends>
+                    <value_type>CHAR</value_type>
+                    <inventory_link>SOFTWARE_APP_A</inventory_link>
+                    <applications>
+                        <application>
+                            <name>ProGet</name>
+                        </application>
+                    </applications>
+                    <triggers>
+                        <trigger>
+                            <expression>{diff()}=1</expression>
+                            <name>ProGet: версия изменилась на {ITEM.LASTVALUE}</name>
+                            <priority>INFO</priority>
+                            <manual_close>YES</manual_close>
+                        </trigger>
+                    </triggers>
+                </item>
+                <item>
+                    <name>ProGet: TLS certificate days left</name>
+                    <key>proget.cert.days</key>
+                    <delay>6h</delay>
+                    <history>30d</history>
+                    <trends>365d</trends>
+                    <applications>
+                        <application>
+                            <name>ProGet</name>
+                        </application>
+                    </applications>
+                    <triggers>
+                        <trigger>
+                            <expression>{last()}&lt;{$PROGET.CERT.MIN} and {last()}&gt;=0</expression>
+                            <name>ProGet: сертификат истекает через {ITEM.LASTVALUE} дн.</name>
+                            <priority>WARNING</priority>
+                        </trigger>
+                        <trigger>
+                            <expression>{last()}&lt;0</expression>
+                            <name>ProGet: сертификат не читается (нет TLS на 443?)</name>
+                            <priority>AVERAGE</priority>
+                        </trigger>
+                    </triggers>
+                </item>
+                <item>
+                    <name>ProGet: data directory size</name>
+                    <key>proget.data.bytes</key>
+                    <delay>1h</delay>
+                    <history>30d</history>
+                    <trends>365d</trends>
+                    <units>B</units>
+                    <applications>
+                        <application>
+                            <name>ProGet</name>
+                        </application>
+                    </applications>
+                </item>
+            </items>
+            <discovery_rules>
+                <discovery_rule>
+                    <name>ProGet containers</name>
+                    <key>proget.containers.discovery</key>
+                    <delay>1h</delay>
+                    <description>Ключ proget.containers.discovery на агенте возвращает LLD-JSON со списком контейнеров, зашитым при установке (CONTAINERS в 70-proget-zabbix-agent.sh).</description>
+                    <item_prototypes>
+                        <item_prototype>
+                            <name>Container {#NAME}: state</name>
+                            <key>proget.container.state[{#NAME}]</key>
+                            <delay>1m</delay>
+                            <history>7d</history>
+                            <trends>0</trends>
+                            <value_type>CHAR</value_type>
+                            <applications>
+                                <application>
+                                    <name>ProGet containers</name>
+                                </application>
+                            </applications>
+                            <trigger_prototypes>
+                                <trigger_prototype>
+                                    <expression>{str(running)}=0</expression>
+                                    <name>Container {#NAME}: {ITEM.LASTVALUE}</name>
+                                    <priority>HIGH</priority>
+                                </trigger_prototype>
+                            </trigger_prototypes>
+                        </item_prototype>
+                        <item_prototype>
+                            <name>Container {#NAME}: health</name>
+                            <key>proget.container.health[{#NAME}]</key>
+                            <delay>1m</delay>
+                            <history>7d</history>
+                            <trends>0</trends>
+                            <value_type>CHAR</value_type>
+                            <applications>
+                                <application>
+                                    <name>ProGet containers</name>
+                                </application>
+                            </applications>
+                            <trigger_prototypes>
+                                <trigger_prototype>
+                                    <expression>{str(unhealthy)}=1</expression>
+                                    <name>Container {#NAME}: unhealthy</name>
+                                    <priority>HIGH</priority>
+                                </trigger_prototype>
+                            </trigger_prototypes>
+                        </item_prototype>
+                        <item_prototype>
+                            <name>Container {#NAME}: restart count</name>
+                            <key>proget.container.restarts[{#NAME}]</key>
+                            <delay>1m</delay>
+                            <history>7d</history>
+                            <trends>90d</trends>
+                            <applications>
+                                <application>
+                                    <name>ProGet containers</name>
+                                </application>
+                            </applications>
+                            <trigger_prototypes>
+                                <trigger_prototype>
+                                    <expression>{change()}&gt;0</expression>
+                                    <name>Container {#NAME}: перезапустился</name>
+                                    <priority>WARNING</priority>
+                                    <manual_close>YES</manual_close>
+                                </trigger_prototype>
+                            </trigger_prototypes>
+                        </item_prototype>
+                    </item_prototypes>
+                </discovery_rule>
+            </discovery_rules>
+            <macros>
+                <macro>
+                    <macro>{$PROGET.CERT.MIN}</macro>
+                    <value>14</value>
+                </macro>
+                <macro>
+                    <macro>{$PROGET.CONTAINERS}</macro>
+                    <value>proget-server proget-database</value>
+                </macro>
+                <macro>
+                    <macro>{$PROGET.RTT.MAX}</macro>
+                    <value>3</value>
+                </macro>
+            </macros>
+        </template>
+    </templates>
+</zabbix_export>
