@@ -26,8 +26,16 @@
 
   var MODE = "inspect";   // inspect | plan | apply
 
-  // Проект, с которого копируем. Имя как в дереве.
+  // Область поиска: работаем только внутри этого проекта и его потомков.
+  // Нужна потому, что в дереве есть и SURA2, и SURA2G1, и одинаковые имена
+  // встречаются по нескольку раз. Id виден в адресе, ...&projectId=<ID>
+  var SCOPE_ID = "Sura2_Components_Cmake";
+
+  // Проект, с которого копируем. Имя как в дереве, поиск внутри SCOPE_ID.
   var DONOR = "EL_CONF";
+
+  // Если имя всё равно неоднозначно, задайте id донора напрямую.
+  var DONOR_ID = "";
 
   // Проекты, в которые копируем. Должны существовать и быть пустыми.
   var TARGETS = [
@@ -96,22 +104,71 @@
 
   var all = (await (await req(api + "/projects")).json()).project || [];
 
+  var byId = {};
+  for (var i0 = 0; i0 < all.length; i0++) byId[all[i0].id] = all[i0];
+
+  function pathOf(p) {
+    var parts = [];
+    var cur = p;
+    var guard = 0;
+    while (cur && guard < 20) {
+      parts.unshift(cur.name);
+      cur = byId[cur.parentProjectId];
+      guard++;
+    }
+    return parts.join("/");
+  }
+
+  function inScope(p) {
+    if (!SCOPE_ID) return true;
+    var cur = p;
+    var guard = 0;
+    while (cur && guard < 20) {
+      if (cur.id === SCOPE_ID) return true;
+      cur = byId[cur.parentProjectId];
+      guard++;
+    }
+    return false;
+  }
+
+  if (SCOPE_ID) {
+    var scope = byId[SCOPE_ID];
+    if (!scope) {
+      console.error("ОШИБКА: SCOPE_ID " + SCOPE_ID + " в дереве не найден.");
+      return;
+    }
+    console.log("Область поиска: " + pathOf(scope) + " (" + SCOPE_ID + ")");
+  }
+
   function findByName(name) {
     var hits = [];
     var low = (name || "").toLowerCase();
     for (var i = 0; i < all.length; i++) {
-      if ((all[i].name || "").toLowerCase() === low) hits.push(all[i]);
+      if ((all[i].name || "").toLowerCase() === low && inScope(all[i])) {
+        hits.push(all[i]);
+      }
     }
     return hits;
   }
 
-  var donors = findByName(DONOR);
-  if (donors.length !== 1) {
-    console.error("ОШИБКА: донор " + DONOR + " найден " + donors.length + " раз.");
-    for (var d = 0; d < donors.length; d++) console.error("  " + donors[d].id);
-    return;
+  function listCandidates(hits) {
+    for (var q = 0; q < hits.length; q++) {
+      console.error("  " + hits[q].id + "   " + pathOf(hits[q]));
+    }
   }
-  var donor = await projectInfo(donors[0].id);
+
+  var donorId = DONOR_ID;
+  if (!donorId) {
+    var donors = findByName(DONOR);
+    if (donors.length !== 1) {
+      console.error("ОШИБКА: донор " + DONOR + " найден " + donors.length
+                    + " раз. Сузьте SCOPE_ID либо задайте DONOR_ID.");
+      listCandidates(donors);
+      return;
+    }
+    donorId = donors[0].id;
+  }
+  var donor = await projectInfo(donorId);
 
   var donorSubs = (donor.projects && donor.projects.project) || [];
   var donorTypes = (donor.buildTypes && donor.buildTypes.buildType) || [];
@@ -120,7 +177,7 @@
   // ---------------------------------------------------------------- INSPECT
 
   if (MODE === "inspect") {
-    console.log("Донор: " + donor.name + " (" + donor.id + ")");
+    console.log("Донор: " + pathOf(byId[donor.id] || donor) + " (" + donor.id + ")");
     console.log("");
     console.log("Подпроекты (" + donorSubs.length + "): " + (names(donorSubs) || "нет"));
     console.log("Конфигурации (" + donorTypes.length + "): " + (names(donorTypes) || "нет"));
@@ -153,13 +210,16 @@
 
   for (var t = 0; t < TARGETS.length; t++) {
     var hits = findByName(TARGETS[t]);
-    var row = { target: TARGETS[t], id: "", subprojects: "", buildTypes: "", state: "" };
+    var row = { target: TARGETS[t], path: "", id: "", subprojects: "", buildTypes: "", state: "" };
 
     if (hits.length === 0) {
       row.state = "MISSING";
     } else if (hits.length > 1) {
       row.state = "AMBIGUOUS";
+      console.error("Цель " + TARGETS[t] + " найдена " + hits.length + " раз:");
+      listCandidates(hits);
     } else {
+      row.path = pathOf(hits[0]);
       var info = await projectInfo(hits[0].id);
       var subs = (info.projects && info.projects.project) || [];
       var types = (info.buildTypes && info.buildTypes.buildType) || [];
